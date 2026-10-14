@@ -58,12 +58,12 @@ Bez instalacji pakietu można też uruchomić `python enrich.py ...` lub `python
 
 | Składnik | Punkty |
 |:---|:---|
-| VirusTotal | `min(60, 6 × złośliwe + 2 × podejrzane)` |
+| VirusTotal | `min(80, 6 × złośliwe + 2 × podejrzane)` |
 | AbuseIPDB | `round(0.4 × pewność nadużyć)` (0-40) |
 | Węzeł wyjściowy Tor (AbuseIPDB) | +10 |
 | Ujemna reputacja społeczności VT | +5 |
 
-Progi: **≥70 MALICIOUS**, **≥30 SUSPICIOUS**, **≥1 LOW RISK**, **0 CLEAN**, brak danych = **UNKNOWN**. Wagi są arbitralne i jawne (`ioc_enricher/scoring.py`). Traktuj wynik jako pomoc w triage, a nie wyrok.
+Progi: **≥70 MALICIOUS**, **≥30 SUSPICIOUS**, **≥1 LOW RISK**, **0 CLEAN**, brak danych = **UNKNOWN**. Hashe, domeny i URL są oceniane wyłącznie przez VirusTotal, więc do MALICIOUS wystarczy im 12 złośliwych silników. Wagi są arbitralne i jawne (`ioc_enricher/scoring.py`). Traktuj wynik jako pomoc w triage, a nie wyrok.
 
 ## Kody wyjścia
 

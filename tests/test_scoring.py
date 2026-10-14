@@ -37,7 +37,19 @@ def test_malicious_combined():
 
 
 def test_vt_component_capped():
-    assert score(IP, [vt(mal=50)]).score == 60
+    assert score(IP, [vt(mal=50)]).score == 80
+
+
+def test_hash_flagged_by_most_engines_is_malicious():
+    # regresja: EICAR, 65/75 silników, brak AbuseIPDB (hash). Wcześniej wychodziło SUSPICIOUS 60.
+    h = classify("275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f")
+    v = score(h, [vt(mal=65, total=75, reputation=3799)])
+    assert (v.label, v.score) == ("MALICIOUS", 80)
+
+
+def test_vt_alone_reaches_malicious_at_12_engines():
+    assert score(IP, [vt(mal=12)]).label == "MALICIOUS"
+    assert score(IP, [vt(mal=11)]).label == "SUSPICIOUS"
 
 
 def test_tor_and_negative_reputation_bonus():
@@ -64,4 +76,4 @@ def test_unknown_when_no_results():
 
 def test_error_provider_ignored_when_other_has_data():
     v = score(IP, [ProviderResult("abuseipdb", ok=False, error="x"), vt(mal=12)])
-    assert v.label == "SUSPICIOUS" and v.score == 60
+    assert v.label == "MALICIOUS" and v.score == 72

@@ -1,7 +1,7 @@
 """Jawny, wyjaśnialny scoring 0-100. Każdy punkt ma uzasadnienie w `reasons`.
 
 Składniki:
-  VirusTotal : min(60, 6 * malicious + 2 * suspicious)
+  VirusTotal : min(80, 6 * malicious + 2 * suspicious)   (12 złośliwych silników = MALICIOUS samo w sobie)
   AbuseIPDB  : round(0.4 * abuse_confidence)          (0-40)
   Tor exit   : +10
   Reputacja VT < 0 : +5
@@ -45,7 +45,7 @@ def score(indicator: Indicator, results: List[ProviderResult]) -> Verdict:
 
     for r in usable:
         if r.provider == "virustotal":
-            pts = min(60, 6 * r.malicious + 2 * r.suspicious)
+            pts = min(80, 6 * r.malicious + 2 * r.suspicious)
             if pts:
                 reasons.append(
                     f"VirusTotal: {r.malicious} złośliwych / {r.suspicious} podejrzanych "
