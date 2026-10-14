@@ -5,7 +5,7 @@ import os
 import sys
 from typing import Dict, List, Optional
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 from . import __version__
 from .cache import Cache
@@ -123,7 +123,7 @@ def collect_indicators(args: argparse.Namespace) -> List[Indicator]:
 
 
 def main(argv: Optional[List[str]] = None, session=None) -> int:
-    load_dotenv()
+    load_dotenv(find_dotenv(usecwd=True))
     parser = build_parser()
     args = parser.parse_args(argv)
 
