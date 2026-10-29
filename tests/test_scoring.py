@@ -58,6 +58,26 @@ def test_tor_and_negative_reputation_bonus():
     assert any("Tor" in r for r in v.reasons)
 
 
+def test_abuseipdb_alone_malicious_only_when_corroborated():
+    # regresja: 100% pewności i setki zgłoszeń dawały max 50 (SUSPICIOUS), bo AbuseIPDB miał sufit 40 + Tor
+    v = score(IP, [ab(100, total_reports=900, distinct_users=40)])
+    assert (v.label, v.score) == ("MALICIOUS", 75)
+    assert any("niezależnych zgłaszających" in r for r in v.reasons)
+
+
+def test_abuseipdb_high_confidence_without_enough_reporters_stays_suspicious():
+    for details in ({"distinct_users": 4}, {}):  # za mało zgłaszających albo brak pola w odpowiedzi
+        v = score(IP, [ab(100, total_reports=900, **details)])
+        assert (v.label, v.score) == ("SUSPICIOUS", 40)
+
+
+def test_abuseipdb_corroboration_needs_90_percent():
+    v = score(IP, [ab(89, distinct_users=50)])
+    assert (v.label, v.score) == ("SUSPICIOUS", 36)
+    v = score(IP, [ab(90, distinct_users=5)])
+    assert (v.label, v.score) == ("MALICIOUS", 71)
+
+
 def test_score_never_exceeds_100():
     assert score(IP, [vt(mal=50, reputation=-5), ab(100, is_tor=True)]).score == 100
 

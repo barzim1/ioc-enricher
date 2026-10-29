@@ -5,7 +5,7 @@ import ipaddress
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Sequence
 from urllib.parse import urlparse
 
 
@@ -63,6 +63,18 @@ def refang(value: str) -> str:
     return v
 
 
+def _lower_url_host(url: str) -> str:
+    """Schemat i host są nieczułe na wielkość liter, ścieżka i query nie. Reszta URL zostaje bez zmian,
+    żeby `Bad.Site/x` i `bad.site/x` miały ten sam klucz w cache, a identyfikator VT nadal był poprawny."""
+    try:
+        netloc = urlparse(url).netloc
+    except ValueError:
+        return url
+    prefix_end = url.index("://") + 3
+    userinfo, at, hostport = netloc.rpartition("@")  # userinfo jest wrażliwe na wielkość liter
+    return url[:prefix_end].lower() + userinfo + at + hostport.lower() + url[prefix_end + len(netloc):]
+
+
 def classify(raw: str) -> Optional[Indicator]:
     """Zwraca Indicator albo None, jeśli wartość nie wygląda na żaden znany typ."""
     v = refang(raw)
@@ -89,7 +101,7 @@ def classify(raw: str) -> Optional[Indicator]:
         except ValueError:
             return None
         if parsed.scheme.lower() in ("http", "https", "ftp") and parsed.netloc:
-            return Indicator(v, IOCType.URL)
+            return Indicator(_lower_url_host(v), IOCType.URL)
         return None
 
     lowered = v.lower().rstrip(".")
@@ -110,10 +122,20 @@ _DOMAIN_IN_TEXT_RE = re.compile(
     r"(?<![\w@./-])(?:[a-z0-9-]{1,63}(?:\[\.\]|\(\.\)|\.))+[a-z]{2,63}(?![\w-])",
     re.IGNORECASE,
 )
+# Cała część lokalna musi zniknąć z tekstu przed szukaniem domen, inaczej `john.smith@x.com` daje "domenę" john.smith.
+_EMAIL_RE = re.compile(
+    r"[A-Za-z0-9._%+\-]+@((?:[a-z0-9-]{1,63}(?:\[\.\]|\(\.\)|\.))+[a-z]{2,63})(?![\w-])",
+    re.IGNORECASE,
+)
+# Kandydat na IPv6 (co najmniej dwa dwukropki); właściwą walidację robi `ipaddress` w classify().
+_IPV6_RE = re.compile(r"(?<![\w:.])(?:[0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}(?![\w:])")
 
 
-def extract(text: str, include_private: bool = False) -> List[Indicator]:
-    """Wyciąga IoC z dowolnego tekstu (log, mail, ticket). Zachowuje kolejność, usuwa duplikaty."""
+def extract(text: str, include_private: bool = False, email_domains: bool = True) -> List[Indicator]:
+    """Wyciąga IoC z dowolnego tekstu (log, mail, ticket). Zachowuje kolejność, usuwa duplikaty.
+
+    `email_domains`: domena z adresu e-mail (np. nadawcy phishingu) jest wskaźnikiem. Część lokalna nigdy nie jest.
+    """
     found: List[Indicator] = []
     seen = set()
 
@@ -138,10 +160,57 @@ def extract(text: str, include_private: bool = False) -> List[Indicator]:
         add(classify(match.group(0)))
     remaining = _IPV4_RE.sub(" ", remaining)
 
+    for match in _IPV6_RE.finditer(remaining):
+        if match.group(0).strip(":"):  # samo "::" to nie adres, tylko np. operator z kodu
+            add(classify(match.group(0)))
+    remaining = _IPV6_RE.sub(" ", remaining)
+
+    for match in _EMAIL_RE.finditer(remaining):
+        if email_domains:
+            add(classify(match.group(1)))
+    remaining = _EMAIL_RE.sub(" ", remaining)
+
     for match in _DOMAIN_IN_TEXT_RE.finditer(remaining):
         add(classify(match.group(0)))
 
     return found
+
+
+# Domeny pomijane przy ekstrakcji z tekstu (nie przy IoC podanych wprost). `example.com` pasuje tylko do siebie,
+# `*.example.com` także do wszystkich subdomen. Lista jest celowo krótka: NIE wpisuj tu usług, w których
+# obcy ludzie zakładają własne subdomeny/zasoby (blob.core.windows.net, amazonaws.com, github.io, googleapis.com,
+# docs.google.com...), bo na nich hostuje się phishing i malware.
+DEFAULT_ALLOWLIST = (
+    "google.com", "www.google.com", "microsoft.com", "www.microsoft.com",
+    "*.windowsupdate.com", "*.microsoftonline.com", "*.msftconnecttest.com",
+    "*.office365.com", "*.digicert.com", "*.letsencrypt.org",
+)
+_ALLOWLIST_ENTRY_RE = re.compile(r"^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$")
+
+
+def load_allowlist(lines: Iterable[str]) -> List[str]:
+    """Wczytuje własną allowlistę (jedna domena lub `*.domena` na linię, # = komentarz)."""
+    out: List[str] = []
+    for line in lines:
+        entry = line.split("#", 1)[0].strip().lower()
+        if not entry:
+            continue
+        if not _ALLOWLIST_ENTRY_RE.match(entry):
+            raise ValueError(f"Nieprawidłowy wpis allowlisty: {entry!r} (użyj 'domena.pl' lub '*.domena.pl')")
+        out.append(entry)
+    return out
+
+
+def is_allowlisted(domain: str, patterns: Sequence[str]) -> bool:
+    domain = domain.lower().rstrip(".")
+    for pattern in patterns:
+        if pattern.startswith("*."):
+            base = pattern[2:]
+            if domain == base or domain.endswith("." + base):
+                return True
+        elif domain == pattern:
+            return True
+    return False
 
 
 def parse_list(lines: Iterable[str]) -> List[Indicator]:

@@ -74,6 +74,53 @@ def test_extract_mode(monkeypatch, tmp_path, capsys):
     assert code == 0 and "185.220.101.5" in out and "10.0.0.9" not in out
 
 
+def _extract_run(tmp_path, monkeypatch, capsys, extra=()):
+    log = tmp_path / "mail.log"
+    log.write_text("sender anna.nowak@evil-support.com via login.microsoftonline.com and corp.example.com\n")
+    s = FakeSession(*(FakeResponse(200, vt_payload()) for _ in range(5)))
+    code, out, err = run([*extra, "--providers", "virustotal", "-x", str(log)], s, monkeypatch, tmp_path, capsys)
+    return code, out, err, s
+
+
+def test_extract_skips_allowlisted_domains_and_says_so(monkeypatch, tmp_path, capsys):
+    code, out, err, s = _extract_run(tmp_path, monkeypatch, capsys)
+    queried = [c["url"].rsplit("/", 1)[-1] for c in s.calls]
+    assert code == 0 and sorted(queried) == ["corp.example.com", "evil-support.com"]
+    assert "anna.nowak" not in out and "login.microsoftonline.com" not in out
+    assert "Pominięto 1 domen z allowlisty" in err and "login.microsoftonline.com" in err
+
+
+def test_custom_allowlist_file(monkeypatch, tmp_path, capsys):
+    (tmp_path / "allow.txt").write_text("# nasza firma\n*.example.com\n")
+    code, out, err, s = _extract_run(tmp_path, monkeypatch, capsys, ["--allowlist", str(tmp_path / "allow.txt")])
+    assert [c["url"].rsplit("/", 1)[-1] for c in s.calls] == ["evil-support.com"]
+
+
+def test_no_allowlist_checks_everything(monkeypatch, tmp_path, capsys):
+    code, out, err, s = _extract_run(tmp_path, monkeypatch, capsys, ["--no-allowlist"])
+    assert len(s.calls) == 3 and "allowlisty" not in err
+
+
+def test_no_email_domains(monkeypatch, tmp_path, capsys):
+    code, out, err, s = _extract_run(tmp_path, monkeypatch, capsys, ["--no-email-domains"])
+    assert [c["url"].rsplit("/", 1)[-1] for c in s.calls] == ["corp.example.com"]
+
+
+def test_explicit_indicator_ignores_allowlist(monkeypatch, tmp_path, capsys):
+    s = FakeSession(FakeResponse(200, vt_payload()))
+    code, out, _ = run(["--providers", "virustotal", "login.microsoftonline.com"], s, monkeypatch, tmp_path, capsys)
+    assert code == 0 and len(s.calls) == 1
+
+
+def test_bad_allowlist_entry_is_error(monkeypatch, tmp_path, capsys):
+    (tmp_path / "allow.txt").write_text("https://corp.example.com\n")
+    log = tmp_path / "a.log"
+    log.write_text("evil.example.org\n")
+    code, _, err = run(["--allowlist", str(tmp_path / "allow.txt"), "-x", str(log)],
+                       FakeSession(), monkeypatch, tmp_path, capsys)
+    assert code == cli.EXIT_ERROR and "Nieprawidłowy wpis" in err
+
+
 def test_file_list_and_output_file(monkeypatch, tmp_path, capsys):
     lst = tmp_path / "iocs.txt"
     lst.write_text("# lista\nexample.com\n")
