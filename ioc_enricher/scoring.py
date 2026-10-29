@@ -3,6 +3,8 @@
 Składniki:
   VirusTotal : min(80, 6 * malicious + 2 * suspicious)   (12 złośliwych silników = MALICIOUS samo w sobie)
   AbuseIPDB  : round(0.4 * abuse_confidence)          (0-40)
+  AbuseIPDB potwierdzone : +35, gdy pewność >= 90% ORAZ >= 5 niezależnych zgłaszających
+                           (sama pewność bez korroboracji nie wystarcza; 90% + 5 osób = MALICIOUS bez VT)
   Tor exit   : +10
   Reputacja VT < 0 : +5
 
@@ -18,6 +20,12 @@ from .models import ProviderResult, Verdict
 
 MALICIOUS_THRESHOLD = 70
 SUSPICIOUS_THRESHOLD = 30
+
+# AbuseIPDB: wysoka pewność potwierdzona przez wielu zgłaszających. Bez tego IP z 100% i setkami zgłoszeń
+# nie mogło przekroczyć 50 punktów (40 + Tor), czyli nigdy nie było MALICIOUS bez VirusTotala.
+ABUSE_CORROBORATED_CONFIDENCE = 90
+ABUSE_CORROBORATED_USERS = 5
+ABUSE_CORROBORATED_BONUS = 35
 
 RECOMMENDATIONS = {
     "MALICIOUS": "Eskalacja / blokada IoC, sprawdzenie hostów, które się z nim komunikowały.",
@@ -67,6 +75,14 @@ def score(indicator: Indicator, results: List[ProviderResult]) -> Verdict:
                 + (f" (+{pts})" if pts else "")
             )
             total += pts
+            users = r.details.get("distinct_users")
+            if ((r.abuse_confidence or 0) >= ABUSE_CORROBORATED_CONFIDENCE
+                    and isinstance(users, int) and users >= ABUSE_CORROBORATED_USERS):
+                total += ABUSE_CORROBORATED_BONUS
+                reasons.append(
+                    f"AbuseIPDB: pewność >= {ABUSE_CORROBORATED_CONFIDENCE}% potwierdzona przez {users} "
+                    f"niezależnych zgłaszających (+{ABUSE_CORROBORATED_BONUS})"
+                )
             if r.details.get("is_tor"):
                 total += 10
                 reasons.append("AbuseIPDB: węzeł wyjściowy Tor (+10)")
