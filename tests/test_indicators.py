@@ -1,6 +1,8 @@
 import pytest
 
-from ioc_enricher.indicators import IOCType, classify, extract, parse_list, refang
+from ioc_enricher.indicators import (
+    DEFAULT_ALLOWLIST, IOCType, classify, extract, is_allowlisted, load_allowlist, parse_list, refang,
+)
 
 SHA256 = "a" * 64
 SHA1 = "b" * 40
@@ -64,8 +66,71 @@ def test_extract_from_log_line():
     assert SHA256 in values
     assert "10.1.1.1" not in values          # prywatne pomijane
     assert "run.ps1" not in values           # rozszerzenie pliku, nie domena
-    assert "corp.example.com" not in values  # domena z adresu e-mail pomijana
+    assert "corp.example.com" in values      # domena nadawcy to wskaźnik (kluczowa przy phishingu)
+    assert "user" not in values              # część lokalna adresu nigdy
     assert "bad.site" not in values          # domena z URL nie jest dublowana
+
+
+def test_extract_email_local_part_is_not_a_domain():
+    # regresja: `john.smith@corp.com` dawało "domenę" john.smith, wysyłaną potem do VirusTotala
+    found = extract("login by john.smith@corp.example.com, sender anna.nowak@evil-support.com")
+    values = {i.value for i in found}
+    assert values == {"corp.example.com", "evil-support.com"}
+
+
+def test_extract_can_skip_email_domains():
+    assert extract("a.b@evil-support.com", email_domains=False) == []
+
+
+def test_extract_ipv6():
+    found = extract("conn from 2a00:1450:4001:81b::200e and [2606:4700::1111]:443")
+    assert {(i.value, i.type) for i in found} == {
+        ("2a00:1450:4001:81b::200e", IOCType.IPV6), ("2606:4700::1111", IOCType.IPV6),
+    }
+
+
+def test_extract_ipv6_private_flagged():
+    (loopback,) = extract("::1", include_private=True)
+    assert loopback.is_private
+
+
+@pytest.mark.parametrize("text", [
+    "at 2026-03-11T10:30:05 done",         # godzina
+    "mac aa:bb:cc:dd:ee:ff seen",          # MAC
+    "eui 00:1a:2b:ff:fe:3c:4d:5e seen",    # EUI-64: poprawna składnia IPv6, ale zakres zarezerwowany
+    "std::vector and Foo:: bar",           # kod, nie adres
+])
+def test_extract_ipv6_false_positives(text):
+    assert extract(text) == []
+
+
+def test_url_host_is_lowercased_but_path_is_not():
+    # ten sam URL zapisany inaczej nie może zużywać dwóch zapytań/wpisów w cache
+    assert classify("HTTP://Bad.Site/Payload?X=1").value == "http://bad.site/Payload?X=1"
+    assert classify("http://User:Pass@Bad.Site:8080/a").value == "http://User:Pass@bad.site:8080/a"
+    assert classify("http://bad.site/a") == classify("http://BAD.SITE/a")
+
+
+@pytest.mark.parametrize("domain,expected", [
+    ("google.com", True),                 # wpis dokładny
+    ("mail.google.com", False),           # wpis dokładny nie obejmuje subdomen
+    ("docs.google.com", False),           # na tym hostuje się phishing
+    ("login.microsoftonline.com", True),  # wildcard
+    ("microsoftonline.com", True),        # wildcard obejmuje też apex
+    ("evilmicrosoftonline.com", False),   # granica etykiety, nie sufiks tekstu
+    ("microsoftonline.com.evil.example", False),
+    ("EXAMPLE.org.", False),
+])
+def test_default_allowlist(domain, expected):
+    assert is_allowlisted(domain, DEFAULT_ALLOWLIST) is expected
+
+
+def test_load_allowlist_validates_entries():
+    assert load_allowlist(["# firma", "", "*.Corp.example.com  # nasza", "intranet.local"]) == [
+        "*.corp.example.com", "intranet.local",
+    ]
+    with pytest.raises(ValueError):
+        load_allowlist(["https://corp.example.com"])
 
 
 def test_extract_include_private_and_dedup():

@@ -10,7 +10,9 @@ from dotenv import find_dotenv, load_dotenv
 from . import __version__
 from .cache import Cache
 from .enricher import Enricher
-from .indicators import Indicator, classify, extract, parse_list
+from .indicators import (
+    DEFAULT_ALLOWLIST, Indicator, IOCType, classify, extract, is_allowlisted, load_allowlist, parse_list,
+)
 from .providers import AbuseIPDB, Provider, VirusTotal
 from .ratelimit import RateLimiter
 from .report import FORMATTERS
@@ -40,6 +42,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="wyciągnij IoC z logu/tekstu i je sprawdź ('-' = stdin)")
     p.add_argument("--include-private", action="store_true",
                    help="nie pomijaj adresów prywatnych/lokalnych")
+    p.add_argument("--allowlist", metavar="PLIK",
+                   help="dodatkowe domeny pomijane przy -x (jedna na linię, '*.domena.pl' obejmuje subdomeny)")
+    p.add_argument("--no-allowlist", action="store_true",
+                   help="przy -x sprawdzaj także domeny z wbudowanej i własnej allowlisty")
+    p.add_argument("--no-email-domains", action="store_true",
+                   help="przy -x nie traktuj domen z adresów e-mail jako wskaźników")
     p.add_argument("--providers", default="virustotal,abuseipdb",
                    help="lista providerów po przecinku (domyślnie: virustotal,abuseipdb)")
     p.add_argument("--format", choices=sorted(FORMATTERS), default="md", help="format wyjścia")
@@ -109,8 +117,19 @@ def collect_indicators(args: argparse.Namespace) -> List[Indicator]:
         for ind in parse_list(_read(args.file).splitlines()):
             add(ind)
     if args.extract:
-        for ind in extract(_read(args.extract), include_private=True):
+        patterns = [] if args.no_allowlist else [
+            *DEFAULT_ALLOWLIST, *(load_allowlist(_read(args.allowlist).splitlines()) if args.allowlist else [])
+        ]
+        allowlisted: List[str] = []
+        for ind in extract(_read(args.extract), include_private=True, email_domains=not args.no_email_domains):
+            if ind.type is IOCType.DOMAIN and is_allowlisted(ind.value, patterns):
+                if ind.value not in allowlisted:
+                    allowlisted.append(ind.value)
+                continue
             add(ind)
+        if allowlisted:
+            _err(f"[i] Pominięto {len(allowlisted)} domen z allowlisty (--no-allowlist, aby je sprawdzić): "
+                 f"{', '.join(allowlisted[:5])}" + (" ..." if len(allowlisted) > 5 else ""))
 
     if not args.include_private:
         skipped = [i for i in collected if i.is_private]
