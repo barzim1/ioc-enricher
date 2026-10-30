@@ -2,6 +2,8 @@
 
 Narzędzie CLI dla analityków pierwszej linii SOC. Przyjmuje wskaźniki kompromitacji (IP, domeny, URL, hashe), sprawdza je w kilku źródłach threat intelligence i zwraca **ocenę ryzyka z uzasadnieniem** w formacie gotowym do wklejenia do ticketu (Jira, TheHive, ServiceNow).
 
+Projekt towarzyszący [HunterScope](https://github.com/barzim1/Hunterscope): triage tożsamości dla SOC L1/L2 (dossier z korelacją wykryć, wyjaśnianie logów, trener alertów).
+
 ## Funkcje
 
 - **Typy IoC:** IPv4/IPv6, domeny, URL, MD5/SHA1/SHA256. Typ jest rozpoznawany automatycznie.
@@ -84,6 +86,7 @@ Progi: **≥70 MALICIOUS**, **≥30 SUSPICIOUS**, **≥1 LOW RISK**, **0 CLEAN**
 
 - Darmowy VirusTotal to 4 zapytania/min i 500/dzień. Duże listy będą trwać (narzędzie wypisze szacunek), cache pomaga przy powtórkach.
 - Adresy prywatne i zarezerwowane (RFC1918, loopback, zakresy dokumentacyjne) są domyślnie pomijane (`--include-private`).
+- Ekstrakcja z tekstu bogatego w linki i oznaczenia (np. raport Markdown z innego narzędzia) bywa zaszumiona: linki referencyjne (np. do MITRE ATT&CK) są traktowane jak URL-e do sprawdzenia, nazwy zakresów OAuth (`Mail.ReadWrite`, `User.Read`) wyglądają jak domeny, a znak backtick przyklejony do adresu zostaje w URL-u. Do czystych list używaj `-f`.
 - Ekstrakcja domen z tekstu jest heurystyczna: nazwy plików z popularnymi rozszerzeniami są odrzucane, ale fałszywe trafienia są możliwe. Domena z adresu e-mail jest wskaźnikiem także wtedy, gdy to Twoja własna domena, więc dopisz ją do `--allowlist` (albo użyj `--no-email-domains`).
 - Adresy IPv6 są rozpoznawane w tekście tylko w pełnej lub skróconej (`::`) składni, bez defangowania.
 - Testy jednostkowe używają zamockowanych odpowiedzi HTTP. Format odpowiedzi API wynika z dokumentacji dostawców, więc przy zmianach po ich stronie parser może wymagać poprawek.
